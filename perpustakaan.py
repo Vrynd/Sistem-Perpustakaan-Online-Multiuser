@@ -1,6 +1,7 @@
 import re
 import random
 import hashlib
+import json
 from datetime import datetime, timedelta
 from dataset import Buku, Anggota
 from tabulate import tabulate
@@ -14,6 +15,7 @@ class Perpustakaan:
         self.nomor_registrasi = "16"
         self.tahun_buka = "24"
         self.urutan_anggota = 1
+        self.load_data()
 
     def generate_id_anggota(self):
         id_anggota = f"{self.tahun_buka}{self.nomor_registrasi}{self.urutan_anggota:02d}"
@@ -32,14 +34,15 @@ class Perpustakaan:
 
     def tambah_buku(self, id_buku, kategori, judul, penulis, tanggal_terbit, penerbit, jumlah):
         if id_buku not in self.daftar_buku:
-            self.daftar_buku[id_buku] = Buku(id_buku,  kategori, judul, penulis, tanggal_terbit, penerbit, jumlah)
+            self.daftar_buku[id_buku] = Buku(id_buku, kategori, judul, penulis, tanggal_terbit, penerbit, jumlah)
             print(f"Buku dengan '{judul}' telah ditambahkan.")
+            self.save_data()
         else:
             print(f"Buku dengan ID {id_buku} sudah ada.")
 
     def tampilkan_buku(self):
         data = []
-        headers = ["ID","Jenis Buku", "Judul", "Penulis", "Tanggal Terbit", "Penerbit" , "Jumlah"]
+        headers = ["ID", "Jenis Buku", "Judul", "Penulis", "Tanggal Terbit", "Penerbit", "Jumlah"]
         for buku in self.daftar_buku.values():
             data.append([buku.id_buku, buku.kategori, buku.judul, buku.penulis, buku.tanggal_terbit, buku.penerbit, buku.jumlah])
         print(tabulate(data, headers, tablefmt="grid"))
@@ -49,14 +52,15 @@ class Perpustakaan:
         username = self.generate_username(nama_anggota)
         password = self.generate_password()
         password_hash = hashlib.sha256(password.encode()).hexdigest()
-        self.daftar_anggota[id_anggota] = Anggota(id_anggota, nama_anggota, asal_kota, usia,no_telepon, username, password_hash)
+        self.daftar_anggota[id_anggota] = Anggota(id_anggota, nama_anggota, asal_kota, usia, no_telepon, username, password_hash)
         print(f"{nama_anggota} Telah ditambahkan sebagai anggota baru. Silahkan login dengan Username: {username} dan Password: {password}")
+        self.save_data()
 
     def tampilkan_anggota(self):
         data = []
         headers = ["ID", "Nama Anggota", "Asal Kota", "Usia", "Username", "Password", "No.Telepon"]
         for anggota in self.daftar_anggota.values():
-            data.append([anggota.id_anggota, anggota.nama_anggota, anggota.asal_kota, anggota.usia, anggota.no_telepon, anggota.username, anggota.password])
+            data.append([anggota.id_anggota, anggota.nama_anggota, anggota.asal_kota, anggota.usia, anggota.username, anggota.password, anggota.no_telepon])
         print(tabulate(data, headers, tablefmt="grid"))
 
     def pinjam_buku(self, id_buku, id_anggota, durasi):
@@ -66,15 +70,19 @@ class Perpustakaan:
                 buku.jumlah -= 1
                 tanggal_peminjaman = datetime.now()
                 tanggal_pengembalian = tanggal_peminjaman + timedelta(days=durasi)
-                self.transaksi.append((id_anggota, id_buku, tanggal_peminjaman, tanggal_pengembalian, durasi))
-                print(f"Buku dengan ID {id_buku} telah berhasil dipinjam.")
-                print(f"Durasi peminjaman: {durasi} hari")
-                print(f"Tanggal peminjaman: {tanggal_peminjaman.strftime('%d-%m-%Y')}")
-                print(f"Tanggal pengembalian: {tanggal_pengembalian.strftime('%d-%m-%Y')}")
+                self.transaksi.append({
+                    'id_anggota': id_anggota,
+                    'id_buku': id_buku,
+                    'tanggal_peminjaman': tanggal_peminjaman,
+                    'tanggal_pengembalian': tanggal_pengembalian,
+                    'durasi': durasi
+                })
+                self.save_data()
+                return f"Buku dengan ID {id_buku} telah berhasil dipinjam."
             else:
-                print(f"Buku dengan ID {id_buku} sedang tidak tersedia.")
+                return f"Buku dengan ID {id_buku} sedang tidak tersedia."
         else:
-            print(f"ID buku {id_buku} atau ID anggota {id_anggota} tidak ditemukan.")
+            return f"ID buku {id_buku} atau ID anggota {id_anggota} tidak ditemukan."
 
     def tampilkan_pinjam_buku(self, hasil_pencarian):
         data_pinjam = []
@@ -95,6 +103,7 @@ class Perpustakaan:
             buku = self.daftar_buku[id_buku]
             buku.jumlah += 1
             self.transaksi.append((id_anggota, id_buku, "kembali"))
+            self.save_data()
             print(f"Anggota dengan ID {id_anggota} telah mengembalikan buku '{buku.judul}'.")
         else:
             print("ID buku atau anggota tidak ditemukan.")
@@ -109,8 +118,34 @@ class Perpustakaan:
 
     def ganti_password_anggota(self, id_anggota, password_baru):
         self.daftar_anggota[id_anggota].ganti_password(password_baru)
+        self.save_data()
         print("Password berhasil diubah.")
 
     def valid_password(self, password):
         pattern = re.compile(r'(?=.*\d)(?=.*[a-z])(?=.*[A-Z])(?=.*[\W_]).{8,}')
         return pattern.match(password)
+
+    def load_data(self):
+        try:
+            with open('data_buku.json', 'r') as file:
+                buku_data = json.load(file)
+                self.daftar_buku = {k: Buku(**v) for k, v in buku_data.items()}
+        except FileNotFoundError:
+            print("File data_buku.json tidak ditemukan. Membuat file baru.")
+        except json.JSONDecodeError:
+            print("File data_buku.json rusak. Membuat file baru.")
+
+        try:
+            with open('data_anggota.json', 'r') as file:
+                anggota_data = json.load(file)
+                self.daftar_anggota = {k: Anggota(**v) for k, v in anggota_data.items()}
+        except FileNotFoundError:
+            print("File data_anggota.json tidak ditemukan. Membuat file baru.")
+        except json.JSONDecodeError:
+            print("File data_anggota.json rusak. Membuat file baru.")
+
+    def save_data(self):
+        with open('data_buku.json', 'w') as file:
+            json.dump({k: v.__dict__ for k, v in self.daftar_buku.items()}, file, indent=4)
+        with open('data_anggota.json', 'w') as file:
+            json.dump({k: v.__dict__ for k, v in self.daftar_anggota.items()}, file, indent=4)
